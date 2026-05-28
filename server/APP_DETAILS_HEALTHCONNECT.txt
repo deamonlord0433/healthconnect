@@ -1,0 +1,579 @@
+HEALTHCONNECT APP — DETAILED WORKING NOTES (CLIENT + SERVER)
+===============================================================
+
+This file documents the complete logic and technologies used in the HealthConnect app contained in this repository.
+
+DISCLAIMER
+- This project is a demonstration / MVP style implementation.
+- Some parts are mocked (e.g., categorization and awareness content data).
+- Authentication is implemented as a UI-level demo (no backend persistence).
+
+
+1) PROJECT OVERVIEW
+--------------------
+HealthConnect is a two-part application:
+1. Client (React + Vite)
+   - Web UI: pages for home, awareness hub, reporting issues, admin dashboard, citizen dashboard, citizen register, login.
+   - Calls backend APIs for complaint submission and complaint management.
+   - Provides multilingual UI support.
+   - Provides “Awareness Hub” educational content using embedded YouTube videos plus expandable guide text.
+   - Provides admin dashboard map view using Leaflet + React-Leaflet.
+
+2. Server (Express + SQLite)
+   - REST API for:
+     a) Submitting complaints (with optional image upload)
+     b) Listing complaints
+     c) Updating complaint status
+     d) Returning awareness guide content (mock data)
+   - Stores complaints in a local SQLite database.
+   - Stores uploaded images in server/uploads.
+
+
+2) TECHNOLOGIES USED (BY AREA)
+-------------------------------
+
+2.1 Client Tech Stack
+- React (UI framework)
+- React Router (client-side routing)
+- Vite (frontend bundler/dev server)
+- Axios (HTTP client)
+- Leaflet + react-leaflet (map UI on admin dashboard)
+- lucide-react (UI icons)
+- Google Translate script integration (UI translation helper)
+- Local state management using React hooks (useState, useEffect, useMemo, useContext)
+
+2.2 Server Tech Stack
+- Node.js
+- Express (HTTP server / routing)
+- cors (enable cross-origin requests from client)
+- dotenv (environment variables)
+- multer (multipart/form-data for image upload)
+- sqlite3 (local SQLite database)
+
+2.3 Data Storage
+- SQLite database file: server/healthconnect.db
+- Complaints table: complaints
+- Uploaded images stored in: server/uploads/
+
+
+3) CLIENT APPLICATION LOGIC (DETAILED)
+---------------------------------------
+
+3.1 Entry Point: client/src/main.jsx
+- Wraps the app with LanguageProvider.
+- Uses React.StrictMode.
+- Renders App into #root.
+
+Key logic:
+- <LanguageProvider> is required to supply the t(key) translation function.
+
+
+3.2 Routing and App Layout: client/src/App.jsx
+- Uses BrowserRouter (React Router).
+- Defines routes:
+  - /                       -> Home
+  - /awareness              -> AwarenessHub
+  - /report                 -> ReportIssue
+  - /login                  -> Login
+  - /admin/dashboard       -> AdminDashboard
+  - /citizen/dashboard     -> CitizenDashboard
+  - /citizen/register      -> CitizenRegister
+
+Layout:
+- Navbar at the top
+- Footer at bottom
+- main content between (Routes inside main)
+
+Important notes:
+- LanguageProvider is used again inside App.jsx, while main.jsx already wraps LanguageProvider.
+  - This results in nested providers. In practice, it still works because both providers supply a similar t(key), but it is redundant.
+
+
+3.3 Multilingual Support: client/src/context/LanguageContext.jsx + client/src/translations.js
+LanguageContext:
+- Creates a context with:
+  - language: current selected language (default: 'en')
+  - setLanguage: updates language
+  - t(key): translation lookup
+
+Translation lookup:
+- It checks translations[language]
+- If missing, falls back to translations['en']
+- If a specific key is missing, returns the key itself.
+
+Translations data:
+- client/src/translations.js exports a translations object with dictionaries for:
+  - en (English)
+  - te (Telugu)
+  - hi (Hindi)
+
+
+3.4 Google Translate Integration: client/src/components/Navbar.jsx
+- Injects Google Translate script once:
+  - script id: google-translate-script
+  - src: //translate.google.com/translate_a/element.js?cb=googleTranslateElementInit
+- Defines window.googleTranslateElementInit to create new TranslateElement.
+
+Language selector behavior:
+- It offers multiple language options (some not in translations.js).
+- When changing the select:
+  - For supported “nativeLangs” = ['en','te','hi'], it clears googtrans cookies and sets language in LanguageContext.
+  - If other languages are selected, it sets googtrans cookie and reloads.
+
+Why both exist:
+- LanguageContext changes dictionary-based UI strings.
+- Google translate can translate dynamic text not covered by dictionaries.
+
+
+3.5 Navbar UI logic
+- Tracks isOpen for mobile hamburger.
+- Desktop: shows links inline.
+- Mobile: shows hamburger toggled dropdown.
+- Highlight logic:
+  - location.pathname compared to link.path to set color to var(--primary) for active route.
+
+
+3.6 Footer: client/src/components/Footer.jsx
+- Pure presentational component.
+- Uses lucide-react icon.
+
+
+3.7 Home page: client/src/pages/Home.jsx
+- Uses t() to render all headings and descriptions.
+- Defines stats array of 4 stat cards.
+  - Icons from lucide-react
+  - Values are static sample values (strings like '1,240+', '45', '89%', '320').
+- “How it works” section:
+  - Step cards (1/2/3) describing the workflow.
+
+No network logic on Home.
+
+
+3.8 AwarenessHub page: client/src/pages/AwarenessHub.jsx
+Purpose:
+- Displays 3 topic cards:
+  1) water_sanitation
+  2) mosquito_prevention
+  3) hand_hygiene_kids
+- Each card contains:
+  - Responsive YouTube iframe embed (inline video)
+  - A guide title and description (from guideContent keys)
+  - A button to expand/collapse a guide panel
+
+State:
+- expandedGuideId: tracks which card guide is open
+
+GuideSection component:
+- Receives t, topicKey, isOpen
+- Looks up guideTopics[topicKey] from client/src/i18n/guideContent.js
+- Uses an animated expand/collapse technique:
+  - transition on max-height and opacity
+  - overflow hidden
+  - maxHeight = 1000 when open else 0
+
+Bullet rendering:
+- For each section in guideTopics:
+  - const bullets = t(sec.bulletsKey)
+  - checks if bullets is an array, then maps bullets into <li>
+
+Safety tips:
+- It uses conditional topicKey to pick one of:
+  - guide_water_sanitation_safety_tips
+  - guide_mosquito_prevention_safety_tips
+  - guide_hand_hygiene_kids_safety_tips
+
+Note:
+- AwarenessHub currently uses embedded TOPIC_CARDS video URLs and local guide topics.
+- The server also provides /api/awareness mock data, but the client code shown does not call it.
+
+
+3.9 ReportIssue page: client/src/pages/ReportIssue.jsx
+Purpose:
+- Let a citizen submit a sanitation/public health issue.
+
+State:
+- description: textarea content
+- location: text
+- priority: 'Low' | 'Normal' | 'High'
+- file: uploaded image file object
+- preview: local preview URL via URL.createObjectURL
+- loading and error
+
+Geolocation:
+- getLocation uses navigator.geolocation.getCurrentPosition
+- On success:
+  - sets location string as:
+    Lat: <lat>, Lng: <lng> (rounded to 4 decimals)
+- On failure:
+  - sets error: 'Unable to retrieve your location'
+
+Submit logic:
+- handleSubmit builds FormData:
+  - description
+  - location
+  - priority
+  - image (only if file exists; input name used: 'image')
+- Sends to backend:
+  - POST http://localhost:5000/api/complaints
+  - header: Content-Type: multipart/form-data
+
+Response handling:
+- On success:
+  - alert shows assigned category from server response
+  - navigate to /citizen/dashboard
+- On failure:
+  - sets generic error
+
+
+3.10 AdminDashboard page: client/src/pages/AdminDashboard.jsx
+Purpose:
+- Admin can view all complaints and update status.
+- Shows a map “Health Risk Heatmap” (note: currently it is not a real heatmap; it only shows OSM tiles and centers on device location).
+
+Dependencies:
+- axios for API calls
+- react-leaflet for map
+- leaflet CSS + L for icon fixes
+
+State:
+- complaints: array of complaint rows
+- loading: boolean
+
+API calls:
+- fetchComplaints:
+  - GET http://localhost:5000/api/complaints
+  - expects response shape: { data: rows }
+  - sets complaints to res.data.data
+
+Status updates:
+- updateStatus(id, newStatus):
+  - PATCH http://localhost:5000/api/complaints/:id/status
+  - body: { status: newStatus }
+  - then refreshes the list
+
+UI helpers:
+- getStatusBadge(status):
+  - if status === 'Resolved' show resolved badge with CheckCircle
+  - else show pending badge with Clock
+- getPriorityColor(priority):
+  - 'High' -> 'text-danger font-bold'
+  - 'Low' -> 'text-gray'
+  - else -> 'text-warning'
+
+Map logic:
+- Uses a MapContainer centered at [17.3850, 78.4867] with zoom 11.
+- Adds a TileLayer from OpenStreetMap.
+- Adds MapDeviceLayer (custom component) that:
+  - calls navigator.geolocation.getCurrentPosition
+  - recenters the map to the device coordinates
+  - does not create a marker (“NO location pin” comment)
+
+Leaflet icon fix:
+- delete L.Icon.Default.prototype._getIconUrl; and mergeOptions with CDN image URLs.
+- This is a common fix for incorrect default icon paths in bundlers.
+
+
+3.11 CitizenRegister page: client/src/pages/CitizenRegister.jsx
+Purpose:
+- UI-level registration for citizen.
+
+State + validation:
+- Captures name, email, password, confirmPassword
+- validate() checks:
+  - all fields filled
+  - email includes '@'
+  - password length >= 6
+  - password === confirmPassword
+
+Submission logic:
+- No backend persistence.
+- It sets localStorage key:
+  - healthconnect_citizen_registered
+  - stores: { name, email, createdAt }
+
+After success:
+- Shows success message
+- Navigates to /login after 1.2 seconds.
+
+
+3.12 Login page: client/src/pages/Login.jsx
+Purpose:
+- Demo login for Admin and Citizen.
+
+State:
+- role (citizen or admin)
+- email, password
+- error
+
+Login logic:
+- Admin demo credentials:
+  - admin@healthconnect.com / admin123
+  - on match navigate('/admin/dashboard')
+- Citizen demo credentials:
+  - citizen@gmail.com / 123456
+  - on match navigate('/citizen/dashboard')
+- Else show error.
+
+No backend auth.
+
+
+3.13 CitizenDashboard
+- Not included in the already-read file outputs in this session, but it is routed at:
+  - /citizen/dashboard
+- It is expected (based on navigation flow) to show citizen complaint history/summary.
+
+
+4) SERVER APPLICATION LOGIC (DETAILED)
+---------------------------------------
+
+4.1 Server entry: server/server.js
+Express setup:
+- express.json() enabled to parse JSON requests.
+- cors() enabled so the client can call the server from a different origin/port.
+- static files:
+  - serves server/uploads at route /uploads
+
+Environment variables:
+- dotenv is loaded: require('dotenv').config();
+- port default: process.env.PORT || 5000
+
+
+4.2 Multer configuration for image upload
+storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, 'uploads/'),
+  filename: (req, file, cb) => cb(null, Date.now() + path.extname(file.originalname)),
+});
+
+upload = multer({ storage })
+
+Important detail:
+- In the complaint endpoint, multer is used as middleware:
+  - upload.single('image')
+- That means the client must send the image under the field name “image”.
+
+Uploaded image path persisted:
+- The API stores imagePath as:
+  - `/uploads/${req.file.filename}`
+- If no file provided, imagePath is null.
+
+Ensuring uploads folder exists:
+- At server start, it checks ./uploads exists; if not creates it.
+
+
+4.3 SQLite DB connection + schema: server/db.js
+- Opens database file:
+  - healthconnect.db located in server directory.
+- On successful open:
+  - db.run(CREATE TABLE IF NOT EXISTS complaints (...))
+
+Complaints table schema:
+- id INTEGER PRIMARY KEY AUTOINCREMENT
+- category TEXT
+- description TEXT
+- location TEXT
+- priority TEXT
+- status TEXT DEFAULT 'Pending'
+- imagePath TEXT
+- createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
+
+
+4.4 Categorization logic ("Fake AI")
+In server/server.js there is a categorizeIssue(description) function.
+
+Behavior:
+- If description is empty => 'General Sanitation'
+- It lowercases description
+- Keyword rules:
+  - If desc includes garbage/trash/waste => 'Garbage Issue'
+  - If desc includes water/drain/leak => 'Water/Drainage Issue'
+  - If desc includes mosquito/bug/dengue => 'Mosquito Risk'
+  - Otherwise => 'General Sanitation'
+
+This is not ML/LLM; it is deterministic keyword-based categorization.
+
+
+4.5 REST API endpoints
+
+Endpoint 1: POST /api/complaints
+Purpose:
+- Submit a new complaint.
+
+Middleware:
+- upload.single('image') to handle optional image upload.
+
+Request body (multipart/form-data):
+- description (string)
+- location (string)
+- priority (optional string)
+- image (optional file with field name 'image')
+
+Server steps:
+1. Read req.body.
+2. Determine imagePath:
+   - if req.file exists -> /uploads/<generated filename>
+   - else null
+3. Determine category using categorizeIssue(description)
+4. SQL insert:
+   INSERT INTO complaints (category, description, location, priority, imagePath)
+   VALUES (?, ?, ?, ?, ?)
+5. priority default:
+   - priority || 'Normal'
+6. Returns JSON:
+   - message
+   - complaintId: this.lastID
+   - category
+
+Error behavior:
+- If SQL fails, returns status 400 with error message.
+
+
+Endpoint 2: GET /api/complaints
+Purpose:
+- Admin dashboard list.
+
+SQL:
+- SELECT * FROM complaints ORDER BY createdAt DESC
+
+Returns JSON:
+- { data: rows }
+
+
+Endpoint 3: PATCH /api/complaints/:id/status
+Purpose:
+- Update a complaint’s status.
+
+Request body JSON:
+- { status: newStatus }
+
+SQL:
+- UPDATE complaints SET status = ? WHERE id = ?
+
+Response:
+- { message: 'Status updated', changes: this.changes }
+
+Error behavior:
+- returns 400 with error message on DB error.
+
+
+Endpoint 4: GET /api/awareness
+Purpose:
+- Provides mock educational data.
+
+Returns:
+- awarenessData array with objects including:
+  - id, title, description, type, url, duration, content
+  - content is an array of headings and text paragraphs
+
+Important note:
+- The client awareness hub currently uses local TOPIC_CARDS and guideContent rather than fetching this endpoint.
+
+
+5) HOW THE APP WORKS END-TO-END (WORKFLOW)
+----------------------------------------------
+
+5.1 Typical citizen flow
+1. User opens Home page.
+2. User selects "Report Now".
+3. User opens ReportIssue page.
+4. User optionally uploads a photo.
+5. User types description.
+6. User captures GPS (optional) which fills location string.
+7. User selects priority.
+8. Submit:
+   - client sends POST /api/complaints (multipart/form-data)
+   - server:
+     a) saves uploaded image to /server/uploads
+     b) categorizes issue using keyword rules
+     c) inserts row into SQLite
+9. Client navigates to CitizenDashboard.
+
+5.2 Typical admin flow
+1. Admin logs in via demo credentials.
+2. Navigates to AdminDashboard.
+3. Admin dashboard calls GET /api/complaints.
+4. Admin sees a table of complaints.
+5. Admin can click “Mark Resolved” which triggers PATCH /api/complaints/:id/status.
+6. Table refreshes.
+7. Map panel:
+   - shows OpenStreetMap tiles
+   - recenters to admin device location (for UI realism)
+
+
+6) DESIGN DECISIONS + IMPLEMENTATION NOTES
+--------------------------------------------
+
+6.1 Keyword-based categorization
+- Implemented because no ML service is integrated.
+- Categorization is handled server-side.
+
+6.2 Upload storage simplicity
+- multer.diskStorage stores files on local filesystem.
+- path generation uses Date.now + original file extension.
+
+6.3 SQLite for simple persistence
+- SQLite keeps the project self-contained.
+- DB schema is created automatically when server starts.
+
+6.4 UI translation approach
+- Primary method: dictionary lookup using LanguageContext.
+- Secondary method: Google Translate script for other languages.
+
+6.5 Leaflet icon fix
+- Bundlers often break Leaflet’s default icon resolution.
+- The code explicitly sets icon URLs via CDN.
+
+6.6 “Heatmap” naming
+- The UI header says “Health Risk Heatmap”, but no heatmap layer is implemented.
+- Only tile layer + recenters map are used.
+
+
+7) FILES INVOLVED (QUICK MAP)
+-----------------------------
+
+Client:
+- client/src/main.jsx
+- client/src/App.jsx
+- client/src/context/LanguageContext.jsx
+- client/src/translations.js
+- client/src/i18n/guideContent.js
+- client/src/components/Navbar.jsx
+- client/src/components/Footer.jsx
+- client/src/pages/Home.jsx
+- client/src/pages/AwarenessHub.jsx
+- client/src/pages/ReportIssue.jsx
+- client/src/pages/AdminDashboard.jsx
+- client/src/pages/Login.jsx
+- client/src/pages/CitizenRegister.jsx
+- client/src/pages/CitizenDashboard.jsx (not inspected in this session)
+
+Server:
+- server/server.js
+- server/db.js
+- server/uploads/ (runtime generated)
+- server/healthconnect.db (runtime persisted)
+
+
+8) PERFORMANCE / SAFETY / LIMITATIONS (KNOWN)
+----------------------------------------------
+- Categorization is simplistic keyword matching.
+- Authentication is demo-only.
+- No input sanitation/validation beyond required fields on the client.
+- Server does not sanitize description/location before storing.
+- No rate limiting.
+- No file size enforcement in multer config (client mentions “up to 5MB” but server does not enforce it in code shown).
+- Admin map does not show complaint markers/heatmap points.
+- No authorization separation for admin vs citizen routes.
+
+
+9) FINAL SUMMARY
+-----------------
+HealthConnect integrates:
+- React + React Router for UI and navigation.
+- A LanguageContext-based translation dictionary.
+- Google Translate for additional translations.
+- Axios calls to a backend REST API.
+- Express + SQLite + multer for persistent complaint storage and image upload.
+- Leaflet for map rendering in admin dashboard.
+
+This file captures the full implemented logic and technology usage in the current project.
+
